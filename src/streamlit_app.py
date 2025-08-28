@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from PIL.Image import Resampling
-import time
 from streamlit_drawable_canvas import st_canvas
 
 from src.version_manager import VersionManager

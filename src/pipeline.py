@@ -5,8 +5,6 @@ import logging
 from src import config
 from src import train
 from src.version_manager import VersionManager
-from src.metrics import record_training_metrics
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -45,23 +43,14 @@ def run_pipeline():
             
             logger.info(f"Model successfully saved to {export_path}!")
             
-            duration = time.time() - start_time
-            record_training_metrics(duration, True, accuracy, new_version)
-            
         else:
             logger.info(f"FAILED: Accuracy ({accuracy:.4f}) is below threshold.")
             logger.info(f"Keeping previous version ({latest_version}) and discarding candidate model.")
-            
-            duration = time.time() - start_time
-            record_training_metrics(duration, False)
             
         logger.info("--- Pipeline Run Finished ---")
         
     except Exception as e:
         logger.error(f"Pipeline failed with error: {e}")
-        duration = time.time() - start_time
-        record_training_metrics(duration, False)
-        raise
 
 if __name__ == "__main__":
     model_dir = os.path.join(config.MODEL_BASE_PATH, config.MODEL_NAME)
