@@ -1,52 +1,71 @@
 import os
 import shutil
+import time
+import logging
 from src import config
 from src import train
+from src.version_manager import VersionManager
+from src.metrics import record_training_metrics
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+version_manager = VersionManager()
 
 def get_latest_version():
-   model_path = os.path.join(config.MODEL_BASE_PATH, config.MODEL_NAME)
-   if not os.path.exists(model_path):
-      return 0
-   
-   versions = [
-      int(d) for d in os.listdir(model_path) 
-      if os.path.isdir(os.path.join(model_path, d)) and d.isdigit()
-   ]
-   
-   return max(versions) if versions else 0
+    versions = version_manager.get_available_versions()
+    return max(versions) if versions else 0
 
 def run_pipeline():
-   """
-   Executes the full retrain-evaluate-deploy pipeline.
-   """
-   print("--- Starting Model Update Pipeline ---")
+    start_time = time.time()
+    logger.info("--- Starting Model Update Pipeline ---")
+    
+    try:
+        latest_version = get_latest_version()
+        logger.info(f"Current model version: {latest_version}")
 
-   latest_version = get_latest_version()
-   print(f"Current model version: {latest_version}")
+        candidate_model, accuracy = train.train_and_evaluate()
+        
+        logger.info(f"Candidate model accuracy: {accuracy:.4f}")
+        logger.info(f"Checking accuracy against threshold ({config.ACCURACY_THRESHOLD})...")
 
-   candidate_model, accuracy = train.train_and_evaluate()
+        if accuracy >= config.ACCURACY_THRESHOLD:
+            new_version = latest_version + 1
+            logger.info(f"PASSED: Accuracy ({accuracy:.4f}) is above threshold.")
+            logger.info(f"Promoting and saving new model as version {new_version}.")
 
-   print(f"\nChecking accuracy against threshold ({config.ACCURACY_THRESHOLD})...")
-   
-   if accuracy >= config.ACCURACY_THRESHOLD:
-      new_version = latest_version + 1
-      print(f"PASSED: Accuracy ({accuracy:.4f}) is above threshold.")
-      print(f"Promoting and saving new model as version {new_version}.")
-      
-      export_path = os.path.join(config.MODEL_BASE_PATH, config.MODEL_NAME, str(new_version))
-      os.makedirs(os.path.dirname(export_path), exist_ok=True)
-      candidate_model.save(export_path)
-      
-      print(f"Model successfully saved!")
-   else:
-      print(f"FAILED: Accuracy ({accuracy:.4f}) is below threshold.")
-      print(f"Keeping previous version ({latest_version}) and discarding candidate model.")
-
-   print("\n--- Pipeline Run Finished ---")
-
+            export_path = os.path.join(config.MODEL_BASE_PATH, config.MODEL_NAME, str(new_version))
+            if os.path.exists(export_path):
+                shutil.rmtree(export_path)
+            os.makedirs(export_path, exist_ok=True)
+            
+            candidate_model.save(export_path, save_format='tf')
+            
+            version_manager.set_current_version(new_version)
+            
+            logger.info(f"Model successfully saved to {export_path}!")
+            
+            duration = time.time() - start_time
+            record_training_metrics(duration, True, accuracy, new_version)
+            
+        else:
+            logger.info(f"FAILED: Accuracy ({accuracy:.4f}) is below threshold.")
+            logger.info(f"Keeping previous version ({latest_version}) and discarding candidate model.")
+            
+            duration = time.time() - start_time
+            record_training_metrics(duration, False)
+            
+        logger.info("--- Pipeline Run Finished ---")
+        
+    except Exception as e:
+        logger.error(f"Pipeline failed with error: {e}")
+        duration = time.time() - start_time
+        record_training_metrics(duration, False)
+        raise
 
 if __name__ == "__main__":
-   if not os.path.exists(config.MODEL_BASE_PATH):
-      os.makedirs(config.MODEL_BASE_PATH)
-      
-   run_pipeline()
+    model_dir = os.path.join(config.MODEL_BASE_PATH, config.MODEL_NAME)
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+        
+    run_pipeline()
